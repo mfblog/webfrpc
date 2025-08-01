@@ -626,7 +626,7 @@ func getLatestVersion() string {
 
 	for _, source := range sources {
 		log.Printf("尝试从 %s 获取版本信息...", source)
-		cmd := exec.Command("curl", "-sL", "--connect-timeout", "10", source)
+		cmd := exec.Command("curl", "-sL", "--connect-timeout", "3", source)
 		output, err := cmd.Output()
 		if err != nil {
 			log.Printf("从 %s 获取失败: %v", source, err)
