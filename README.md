@@ -24,39 +24,24 @@
 - 📁 **文件嵌入打包**：支持将 web 文件嵌入到程序中，实现单文件部署
 
 ## 快速开始
-
-### 1. 安装程序
-
-```bash
-# 方式一：使用安装脚本（推荐）
-sudo ./install.sh
-
-# 方式二：构建嵌入版本（单文件部署）
-./build-embedded.sh
-sudo cp webfrpc /usr/local/bin/
-
-# 方式三：手动安装
-sudo mkdir -p /usr/local/frp
-sudo cp -r . /usr/local/frp/
-cd /usr/local/frp
-go build -o webfrpc main.go
-```
-
-### 2. 启动程序
+### 最简单的用法
 
 ```bash
-# 进入安装目录
-cd /usr/local/frp
-
-# 方式一：使用启动脚本（推荐）
-./start.sh
-
-# 方式二：直接运行
-./webfrpc
-
-# 方式三：开发模式
-go run main.go
+mkdir -p /usr/local/frp
 ```
+
+### 将install-service.sh 和 对应架构的程序放到 /usr/local/frp
+
+### 给权限
+```bash
+chmod 755 install-service.sh webfrpc-x86_64
+```
+
+### 运行
+```bash
+./install-service.sh
+```
+### 浏览器打开 http://ip:8888 web管理界面开始使用就可以了
 
 **首次运行**：程序会自动进行系统检查：
 - 检查并创建 `/usr/local/frp` 目录
