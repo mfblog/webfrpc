@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FRP 客户端配置管理</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" href="/favicon.svg">
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <div class="max-w-4xl mx-auto">
+            <div class="flex justify-between items-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-800">FRP 客户端配置管理</h1>
+                <div v-if="configExists && currentView === 'proxy'" class="flex space-x-2">
+                    <button @click="openLogs" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md transition duration-200">
+                        <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        日志
+                    </button>
+                    <button @click="currentView = 'settings'" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition duration-200">
+                        <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.349 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.349a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.349 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.349a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                        设置
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 错误提示 -->
+            <div v-if="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+                <strong class="font-bold">错误：</strong>
+                <span class="block sm:inline">{{ error }}</span>
+            </div>
+            
+            <!-- 成功提示 -->
+            <div v-if="success" class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-6">
+                <strong class="font-bold">成功：</strong>
+                <span class="block sm:inline">{{ success }}</span>
+            </div>
+
+            <!-- 连接状态提示 -->
+            <div v-if="connectionStatus" class="mb-6">
+                <div v-if="connectionStatus.connected" class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+                    <strong class="font-bold">✓ 服务器连接成功：</strong>
+                    <span class="block sm:inline">{{ connectionStatus.message }}</span>
+                </div>
+                <div v-else class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                    <strong class="font-bold">✗ 服务器连接失败：</strong>
+                    <span class="block sm:inline">{{ connectionStatus.message }}</span>
+                    <button v-if="connectionStatus.logs" @click="showConnectionLogs = true" class="ml-2 text-sm underline">查看详细日志</button>
+                </div>
+            </div>
+
+            <!-- 更新提示 -->
+            <div v-if="needsUpdate && systemStatus" class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <strong class="font-bold">🔄 发现新版本：</strong>
+                        <span class="block sm:inline">当前版本 {{ systemStatus.frpcVersion }}，最新版本 {{ systemStatus.latestVersion }}</span>
+                    </div>
+                    <button @click="updateFrpc" :disabled="installing" class="bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-md text-sm transition duration-200">
+                        {{ installing ? '更新中...' : '立即更新' }}
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 加载状态 -->
+            <div v-if="loading" class="text-center py-4">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <p class="mt-2 text-gray-600">{{ loadingMessage }}</p>
+            </div>
+
+            <!-- 安装界面 -->
+            <div v-if="currentView === 'install'" class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="text-center">
+                    <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 mb-4">
+                        <svg class="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">需要安装 FRP 客户端</h3>
+                    <p class="text-sm text-gray-500 mb-6">系统检测到 frpc 客户端程序不存在，需要先安装才能继续使用。</p>
+
+                    <div v-if="systemStatus" class="bg-gray-50 rounded-lg p-4 mb-6 text-left">
+                        <h4 class="text-sm font-medium text-gray-900 mb-2">系统状态：</h4>
+                        <ul class="text-sm text-gray-600 space-y-1">
+                            <li>安装目录：{{ systemStatus.installDirExists ? '✅ 存在' : '❌ 不存在' }}</li>
+                            <li>frpc 客户端：{{ systemStatus.frpcExists ? '✅ 已安装' : '❌ 未安装' }}</li>
+                            <li>系统服务：{{ systemStatus.serviceExists ? '✅ 已配置' : '❌ 未配置' }}</li>
+                            <li>配置文件：{{ systemStatus.configExists ? '✅ 存在' : '❌ 不存在' }}</li>
+                            <li v-if="systemStatus.latestVersion">最新版本：{{ systemStatus.latestVersion }}</li>
+                        </ul>
+                    </div>
+
+                    <button @click="installFrpc" :disabled="installing" class="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white px-6 py-3 rounded-md transition duration-200">
+                        {{ installing ? '正在安装...' : '安装 FRP 客户端' }}
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 初始配置表单 (当配置文件不存在时显示) -->
+            <div v-if="!configExists || currentView === 'settings'" class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">{{ !configExists ? '初始配置' : '基础配置' }}</h2>
+                    <div class="flex space-x-2">
+                        <button @click="saveConfig" :disabled="loading" class="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-md transition duration-200">
+                            {{ !configExists ? '创建配置并启动服务' : '保存配置并重启服务' }}
+                        </button>
+                        <button v-if="configExists && currentView === 'settings'" @click="currentView = 'proxy'" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md transition duration-200">
+                            返回代理配置
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">服务器地址</label>
+                        <input v-model="config.serverAddr" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">服务器端口</label>
+                        <input v-model.number="config.serverPort" type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">传输协议</label>
+                        <select v-model="config.transport.protocol" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="tcp">TCP</option>
+                            <option value="kcp">KCP</option>
+                            <option value="websocket">WebSocket</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">认证令牌</label>
+                        <input v-model="config.auth.token" type="password" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800">TLS 配置</h3>
+                    <label class="flex items-center cursor-pointer">
+                        <input v-model="tlsEnabled" type="checkbox" class="sr-only">
+                        <div class="relative">
+                            <div class="block bg-gray-600 w-14 h-8 rounded-full" :class="{'bg-blue-600': tlsEnabled}"></div>
+                            <div class="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition" :class="{'transform translate-x-6': tlsEnabled}"></div>
+                        </div>
+                        <span class="ml-3 text-sm font-medium text-gray-700">启用 TLS</span>
+                    </label>
+                </div>
+                <div v-if="tlsEnabled" class="grid grid-cols-1 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">证书文件路径</label>
+                        <input v-model="config.transport.tls.certFile" type="text" placeholder="/path/to/client.crt" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">私钥文件路径</label>
+                        <input v-model="config.transport.tls.keyFile" type="text" placeholder="/path/to/client.key" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">CA 证书文件路径</label>
+                        <input v-model="config.transport.tls.trustedCaFile" type="text" placeholder="/path/to/ca.crt" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">日志配置</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">日志输出</label>
+                        <select v-model="config.log.to" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="console">控制台</option>
+                            <option value="file">文件</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">日志级别</label>
+                        <select v-model="config.log.level" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="trace">trace</option>
+                            <option value="debug">debug</option>
+                            <option value="info">info</option>
+                            <option value="warn">warn</option>
+                            <option value="error">error</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">日志保留天数</label>
+                        <input v-model.number="config.log.maxDays" type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 代理配置 (当配置文件存在且在代理视图时显示) -->
+            <div v-if="configExists && currentView === 'proxy'" class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">代理配置</h2>
+                    <div class="flex space-x-2">
+                        <button @click="saveConfig" :disabled="loading" class="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-md transition duration-200">
+                            保存配置并重启服务
+                        </button>
+                        <button @click="addProxy" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md transition duration-200">
+                            添加代理
+                        </button>
+                    </div>
+                </div>
+                
+                <div v-for="(proxy, index) in config.proxies" :key="index" class="border border-gray-200 rounded-lg mb-4">
+                    <div @click="toggleProxy(index)" class="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition duration-200">
+                        <div class="flex items-center">
+                            <svg class="w-5 h-5 mr-2 transition-transform duration-200" :class="{'rotate-90': proxyExpanded[index]}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                            </svg>
+                            <h3 class="text-lg font-medium text-gray-800">{{ proxy.name || '代理 ' + (index + 1) }}</h3>
+                            <span class="ml-2 text-sm text-gray-500">({{ proxy.type }}:{{ proxy.localPort }}→{{ proxy.remotePort }})</span>
+                        </div>
+                        <button @click.stop="removeProxy(index)" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md text-sm transition duration-200">
+                            删除
+                        </button>
+                    </div>
+
+                    <div v-show="proxyExpanded[index]" class="px-4 pb-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">名称</label>
+                            <input v-model="proxy.name" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">类型</label>
+                            <select v-model="proxy.type" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="tcp">TCP</option>
+                                <option value="udp">UDP</option>
+                                <option value="http">HTTP</option>
+                                <option value="https">HTTPS</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">本地IP</label>
+                            <input v-model="proxy.localIP" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">本地端口</label>
+                            <input v-model.number="proxy.localPort" type="number" placeholder="例如: 22, 3389, 8080" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">远程端口</label>
+                            <input v-model.number="proxy.remotePort" type="number" placeholder="例如: 2222, 3389, 8080" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                </div>
+                
+                <div v-if="config.proxies.length === 0" class="text-center py-8 text-gray-500">
+                    暂无代理配置，点击"添加代理"按钮开始配置
+                </div>
+            </div>
+
+
+        </div>
+    </div>
+
+    <!-- 日志模态框 -->
+    <div v-if="showLogs" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" @click="closeLogs">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white" @click.stop>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">FRP 服务日志 <span class="text-sm text-gray-500">(自动刷新)</span></h3>
+                <button @click="closeLogs" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="bg-black text-green-400 p-4 rounded-md h-96 overflow-y-auto font-mono text-sm" id="logContainer">
+                <pre v-if="logs">{{ logs }}</pre>
+                <div v-else class="text-gray-500">正在加载日志...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 连接日志模态框 -->
+    <div v-if="showConnectionLogs" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" @click="showConnectionLogs = false">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white" @click.stop>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">连接状态日志</h3>
+                <button @click="showConnectionLogs = false" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="bg-black text-green-400 p-4 rounded-md h-96 overflow-y-auto font-mono text-sm">
+                <pre v-if="connectionStatus && connectionStatus.logs">{{ connectionStatus.logs }}</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+        
+        createApp({
+            data() {
+                return {
+                    configExists: false,
+                    currentView: 'settings', // 'settings' 或 'proxy' 或 'install'
+                    tlsEnabled: false,
+                    proxyExpanded: [], // 代理卡片展开状态
+                    showLogs: false,
+                    showConnectionLogs: false,
+                    logs: '',
+                    loadingLogs: false,
+                    connectionStatus: null,
+                    logRefreshInterval: null,
+                    systemStatus: null,
+                    needsInstall: false,
+                    needsUpdate: false,
+                    installing: false,
+                    config: {
+                        serverAddr: '',
+                        serverPort: 7000,
+                        transport: {
+                            protocol: 'tcp',
+                            tls: {
+                                certFile: '',
+                                keyFile: '',
+                                trustedCaFile: ''
+                            }
+                        },
+                        auth: {
+                            token: ''
+                        },
+                        log: {
+                            to: 'console',
+                            level: 'info',
+                            maxDays: 3
+                        },
+                        proxies: []
+                    },
+                    loading: false,
+                    loadingMessage: '',
+                    error: '',
+                    success: ''
+                }
+            },
+            mounted() {
+                this.checkSystemStatus();
+            },
+            methods: {
+                async checkSystemStatus() {
+                    try {
+                        const response = await axios.get('/api/system-status');
+                        this.systemStatus = response.data;
+
+                        // 检查是否需要安装
+                        if (!response.data.frpcExists) {
+                            this.needsInstall = true;
+                            this.currentView = 'install';
+                            return;
+                        }
+
+                        // 检查是否需要更新
+                        if (response.data.frpcVersion && response.data.latestVersion &&
+                            response.data.frpcVersion !== response.data.latestVersion) {
+                            this.needsUpdate = true;
+                        }
+
+                        // 继续检查配置文件
+                        this.checkConfigFile();
+                    } catch (error) {
+                        this.error = '检查系统状态失败: ' + (error.response?.data?.error || error.message);
+                        this.checkConfigFile(); // 降级到原有逻辑
+                    }
+                },
+
+                async checkConfigFile() {
+                    try {
+                        const response = await axios.get('/api/check');
+                        this.configExists = response.data.exists;
+
+                        if (this.configExists) {
+                            this.currentView = 'proxy';
+                            this.loadConfig();
+                        } else {
+                            this.currentView = 'settings';
+                        }
+                    } catch (error) {
+                        this.error = '检查配置文件失败: ' + (error.response?.data?.error || error.message);
+                        this.configExists = false;
+                        this.currentView = 'settings';
+                    }
+                },
+
+                async loadConfig() {
+                    this.loading = true;
+                    this.loadingMessage = '加载配置中...';
+                    this.clearMessages();
+                    
+                    try {
+                        const response = await axios.get('/api/config');
+                        this.config = response.data;
+                        // 检查是否启用了 TLS
+                        this.tlsEnabled = !!(this.config.transport.tls.certFile || this.config.transport.tls.keyFile || this.config.transport.tls.trustedCaFile);
+                        // 初始化代理展开状态（默认折叠）
+                        this.proxyExpanded = new Array(this.config.proxies.length).fill(false);
+                        this.success = '配置加载成功';
+                        // 5秒后自动隐藏消息
+                        this.autoHideMessages();
+                    } catch (error) {
+                        this.error = '加载配置失败: ' + (error.response?.data?.error || error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                async saveConfig() {
+                    this.loading = true;
+
+                    if (!this.configExists) {
+                        this.loadingMessage = '创建配置并启动服务中...';
+                    } else if (this.currentView === 'settings') {
+                        this.loadingMessage = '保存设置中...';
+                    } else {
+                        this.loadingMessage = '保存配置并重启服务中...';
+                    }
+
+                    this.clearMessages();
+
+                    // 处理 TLS 配置
+                    if (!this.tlsEnabled) {
+                        // 如果 TLS 未启用，清空 TLS 配置
+                        this.config.transport.tls = {
+                            certFile: '',
+                            keyFile: '',
+                            trustedCaFile: ''
+                        };
+                    }
+
+                    try {
+                        const response = await axios.post('/api/config', this.config);
+
+                        // 检查是否需要安装 frpc
+                        if (response.data.needInstall) {
+                            this.success = response.data.message;
+                            this.configExists = true;
+                            // 不切换到代理视图，保持在当前页面让用户安装 frpc
+                        } else {
+                            // 处理连接状态
+                            this.connectionStatus = response.data.connectionStatus;
+
+                            if (!this.configExists) {
+                                this.success = '配置创建成功，服务已启动';
+                                this.configExists = true;
+                                this.currentView = 'proxy';
+                            } else if (this.currentView === 'settings') {
+                                this.success = '设置保存成功，服务已重启';
+                                this.currentView = 'proxy';
+                            } else {
+                                this.success = '配置保存成功，服务已重启';
+                            }
+
+                            // 重新初始化代理展开状态（保存后折叠）
+                            this.proxyExpanded = new Array(this.config.proxies.length).fill(false);
+                        }
+
+                        // 5秒后自动隐藏消息
+                        this.autoHideMessages();
+                    } catch (error) {
+                        this.error = '保存配置失败: ' + (error.response?.data?.error || error.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                addProxy() {
+                    this.config.proxies.push({
+                        name: '',
+                        type: 'tcp',
+                        localIP: '127.0.0.1',
+                        localPort: 80,
+                        remotePort: 8080
+                    });
+                    // 新添加的代理默认展开
+                    this.proxyExpanded.push(true);
+                },
+
+                removeProxy(index) {
+                    this.config.proxies.splice(index, 1);
+                    this.proxyExpanded.splice(index, 1);
+                },
+
+                toggleProxy(index) {
+                    // Vue 3 响应式数组更新
+                    this.proxyExpanded[index] = !this.proxyExpanded[index];
+                },
+
+                async loadLogs() {
+                    try {
+                        const response = await axios.get('/api/logs');
+                        this.logs = response.data.logs;
+                    } catch (error) {
+                        console.error('获取日志失败:', error);
+                    }
+                },
+
+                startLogRefresh() {
+                    // 立即加载一次日志
+                    this.loadLogs();
+                    // 每2秒刷新一次日志
+                    this.logRefreshInterval = setInterval(() => {
+                        this.loadLogs();
+                    }, 2000);
+                },
+
+                stopLogRefresh() {
+                    if (this.logRefreshInterval) {
+                        clearInterval(this.logRefreshInterval);
+                        this.logRefreshInterval = null;
+                    }
+                },
+
+                openLogs() {
+                    this.showLogs = true;
+                    this.startLogRefresh();
+                },
+
+                closeLogs() {
+                    this.showLogs = false;
+                    this.stopLogRefresh();
+                },
+
+                async installFrpc() {
+                    this.installing = true;
+                    this.clearMessages();
+
+                    try {
+                        const response = await axios.post('/api/install-frpc');
+                        this.success = response.data.message;
+                        // 重新检查系统状态
+                        await this.checkSystemStatus();
+                    } catch (error) {
+                        this.error = '安装失败: ' + (error.response?.data?.error || error.message);
+                    } finally {
+                        this.installing = false;
+                    }
+                },
+
+                async updateFrpc() {
+                    this.installing = true;
+                    this.clearMessages();
+
+                    try {
+                        const response = await axios.post('/api/update-frpc');
+                        this.success = response.data.message;
+                        this.needsUpdate = false;
+                        // 重新检查系统状态
+                        await this.checkSystemStatus();
+                    } catch (error) {
+                        this.error = '更新失败: ' + (error.response?.data?.error || error.message);
+                    } finally {
+                        this.installing = false;
+                    }
+                },
+                
+                clearMessages() {
+                    this.error = '';
+                    this.success = '';
+                    this.connectionStatus = null;
+                },
+
+                autoHideMessages() {
+                    // 5秒后自动隐藏成功消息和连接状态
+                    setTimeout(() => {
+                        this.success = '';
+                        this.connectionStatus = null;
+                    }, 5000);
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
