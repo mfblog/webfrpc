@@ -43,6 +43,12 @@ chmod 755 install-service.sh webfrpc-x86_64
 ```
 ### 浏览器打开 http://ip:8888 web管理界面开始使用就可以了
 
+
+```bash
+可以git clone https://github.com/mfblog/webfrpc.git
+进入目录。使用 build.sh 自己编译
+```
+
 **首次运行**：程序会自动进行系统检查：
 - 检查并创建 `/usr/local/frp` 目录
 - 检查 frpc 客户端是否存在
