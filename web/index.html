@@ -306,7 +306,7 @@
             data() {
                 return {
                     configExists: false,
-                    currentView: 'settings', // 'settings' 或 'proxy' 或 'install'
+                    currentView: 'loading', // 'settings' 或 'proxy' 或 'install' 或 'loading'
                     tlsEnabled: false,
                     proxyExpanded: [], // 代理卡片展开状态
                     showLogs: false,
@@ -352,6 +352,15 @@
             methods: {
                 async checkSystemStatus() {
                     try {
+                        // 首先检查配置文件是否存在
+                        await this.checkConfigFile();
+
+                        // 如果配置文件存在，直接进入代理页面，不需要检查其他状态
+                        if (this.configExists) {
+                            return; // checkConfigFile 已经设置了 currentView 和加载了配置
+                        }
+
+                        // 配置文件不存在时，检查系统状态
                         const response = await axios.get('/api/system-status');
                         this.systemStatus = response.data;
 
@@ -368,11 +377,16 @@
                             this.needsUpdate = true;
                         }
 
-                        // 继续检查配置文件
-                        this.checkConfigFile();
+                        // frpc 存在但配置文件不存在，进入初始配置页面
+                        this.currentView = 'settings';
                     } catch (error) {
                         this.error = '检查系统状态失败: ' + (error.response?.data?.error || error.message);
-                        this.checkConfigFile(); // 降级到原有逻辑
+                        // 降级：尝试检查配置文件
+                        try {
+                            await this.checkConfigFile();
+                        } catch (configError) {
+                            this.currentView = 'settings';
+                        }
                     }
                 },
 
@@ -385,12 +399,17 @@
                             this.currentView = 'proxy';
                             this.loadConfig();
                         } else {
-                            this.currentView = 'settings';
+                            // 只有在当前视图是 loading 时才设置为 settings
+                            if (this.currentView === 'loading') {
+                                this.currentView = 'settings';
+                            }
                         }
                     } catch (error) {
                         this.error = '检查配置文件失败: ' + (error.response?.data?.error || error.message);
                         this.configExists = false;
-                        this.currentView = 'settings';
+                        if (this.currentView === 'loading') {
+                            this.currentView = 'settings';
+                        }
                     }
                 },
 
