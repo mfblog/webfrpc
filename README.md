@@ -214,5 +214,5 @@ go build -ldflags "-s -w" -o webfrpc main.go
 - 检查网络连接是否正常
 
 ## 许可证
-
-MIT License
+本项目版权归作者所有，仅限个人学习与研究使用，禁止用于任何商业用途。
+For personal learning and research only. Commercial use is strictly prohibited.

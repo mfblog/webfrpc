@@ -619,6 +619,8 @@ func getLatestVersion() string {
 		"https://ghfast.top/https://github.com/fatedier/frp/releases/latest",
 		"https://hk.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
 		"https://gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
+		"https://hk.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
+		"https://gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
 		"https://cdn.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
 		"https://edgeone.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
 	}
