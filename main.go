@@ -615,7 +615,6 @@ func getFrpcVersion() string {
 func getLatestVersion() string {
 	// 尝试多个源获取版本信息
 	sources := []string{
-		"https://github.com/fatedier/frp/releases/latest",
 		"https://ghfast.top/https://github.com/fatedier/frp/releases/latest",
 		"https://hk.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
 		"https://gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
