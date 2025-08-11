@@ -64,7 +64,6 @@ type ErrorResponse struct {
 var (
 	installDir  = "/usr/local/frp"
 	configPath  = "/usr/local/frp/frpc.toml"
-	frpcPath    = "" // 将在 init() 中动态设置
 	serviceName = "frpc.service"
 	serviceFile = "/etc/systemd/system/frpc.service"
 )
@@ -101,6 +100,9 @@ func main() {
 	if err := initializeSystem(); err != nil {
 		log.Fatalf("系统初始化失败: %v", err)
 	}
+
+	// 异步执行 frpc 自动更新检查
+	go autoUpdateFrpcOnStart()
 
 	// 设置 Gin 模式
 	gin.SetMode(gin.ReleaseMode)
@@ -274,6 +276,11 @@ WantedBy=multi-user.target
 // 启动系统服务
 func startSystemService() error {
 	return exec.Command("systemctl", "start", serviceName).Run()
+}
+
+// 停止 frpc 服务
+func stopFrpcService() error {
+	return exec.Command("systemctl", "stop", serviceName).Run()
 }
 
 // 检查配置文件是否存在
@@ -821,4 +828,60 @@ func getSystemArch() string {
 		log.Printf("未知架构: %s，使用默认架构 amd64", arch)
 		return "amd64"
 	}
+}
+
+// autoUpdateFrpcOnStart 在程序启动时检查并更新 frpc
+func autoUpdateFrpcOnStart() {
+	log.Println("开始启动时 frpc 自动更新检查...")
+
+	// 1. 检查 frpc 是否存在，如果不存在，则不执行任何操作
+	if !checkFrpcExists() {
+		log.Println("frpc 客户端不存在，跳过自动更新。")
+		return
+	}
+
+	// 2. 获取本地版本和最新版本
+	localVersion := getFrpcVersion()
+	latestVersion := getLatestVersion()
+
+	log.Printf("本地 frpc 版本: %s", localVersion)
+	log.Printf("最新 frpc 版本: %s", latestVersion)
+
+	// 3. 比较版本并决定是否更新
+	if localVersion == "" || latestVersion == "" {
+		log.Println("无法获取版本信息，跳过自动更新。")
+		return
+	}
+
+	if localVersion == latestVersion {
+		log.Println("frpc 已是最新版本，无需更新。")
+		return
+	}
+
+	log.Printf("发现新版本 frpc (%s -> %s)，开始自动更新...", localVersion, latestVersion)
+
+	// 4. 执行更新
+	// 4.1. 先停止 frpc 服务，避免 "text file busy" 错误
+	log.Println("正在停止 frpc 服务以便更新...")
+	if err := stopFrpcService(); err != nil {
+		log.Printf("更新前停止 frpc 服务失败: %v", err)
+		// 即使停止失败，也继续尝试更新，可能服务本来就没在运行
+	}
+
+	// 4.2. 执行下载和安装
+	if err := downloadAndInstallFrpc(); err != nil {
+		log.Printf("frpc 自动更新失败: %v", err)
+		return
+	}
+
+	log.Println("frpc 自动更新成功！")
+
+	// 5. 重启 frpc 服务以应用更新
+	log.Println("正在重启 frpc 服务以应用更新...")
+	if err := restartFrpcService(); err != nil {
+		log.Printf("更新后重启 frpc 服务失败: %v", err)
+		return
+	}
+
+	log.Println("frpc 服务已成功重启。")
 }
