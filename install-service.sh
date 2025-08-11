@@ -43,10 +43,15 @@ if [ ! -f "$PROGRAM_PATH" ]; then
     echo "错误：找不到程序文件 $PROGRAM_PATH"
     echo "请确保已经编译并放置了对应架构的程序文件"
     exit 1
-fi
-
-# 检查 systemctl 是否可用
-if ! command -v systemctl &> /dev/null; then
+   fi
+   
+   # 创建或更新符号链接，指向特定架构的程序
+   SYMLINK_PATH="${INSTALL_DIR}/webfrpc"
+   echo "创建符号链接: ${SYMLINK_PATH} -> ${PROGRAM_PATH}"
+   ln -sf "$PROGRAM_PATH" "$SYMLINK_PATH"
+   
+   # 检查 systemctl 是否可用
+   if ! command -v systemctl &> /dev/null; then
     echo "错误：systemctl 不可用，此系统可能不支持 systemd"
     exit 1
 fi
@@ -71,9 +76,32 @@ Type=simple
 User=root
 Restart=on-failure
 RestartSec=5s
-ExecStart=$PROGRAM_PATH
+ExecStart=$SYMLINK_PATH
 WorkingDirectory=$INSTALL_DIR
 Environment=GIN_MODE=release
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "创建 frpc 系统服务文件..."
+FRPC_SERVICE_FILE="/etc/systemd/system/frpc.service"
+FRPC_PATH="${INSTALL_DIR}/frpc"
+FRPC_CONFIG_PATH="${INSTALL_DIR}/frpc.toml"
+
+cat > $FRPC_SERVICE_FILE << EOF
+[Unit]
+Description=FRP Client
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+Restart=on-failure
+RestartSec=5s
+ExecStart=$FRPC_PATH -c $FRPC_CONFIG_PATH
 LimitNOFILE=1048576
 
 [Install]
@@ -84,9 +112,13 @@ EOF
 echo "重新加载 systemd 配置..."
 systemctl daemon-reload
 
-# 启用服务
-echo "启用服务（开机自启动）..."
+# 启用 webfrpc 服务
+echo "启用 ${SERVICE_NAME} 服务（开机自启动）..."
 systemctl enable $SERVICE_NAME
+
+# 启用 frpc 服务
+echo "启用 frpc.service 服务（开机自启动）..."
+systemctl enable frpc.service
 
 # 启动服务
 echo "启动服务..."
@@ -103,8 +135,8 @@ if systemctl is-active --quiet $SERVICE_NAME; then
     echo "========================================="
     echo "服务名称: $SERVICE_NAME"
     echo "服务状态: $(systemctl is-active $SERVICE_NAME)"
-    echo "访问地址: http://localhost:8888"
-    echo "网络访问: http://$(hostname -I | awk '{print $1}'):8888"
+    echo "访问地址: http://localhost:9696"
+    echo "网络访问: http://$(hostname -I | awk '{print $1}'):9696"
     echo ""
     echo "管理命令："
     echo "  查看状态: sudo systemctl status $SERVICE_NAME"

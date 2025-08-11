@@ -89,7 +89,7 @@ echo "  x86_64: ./${PROGRAM_NAME}-x86_64"
 echo "  arm64:  ./${PROGRAM_NAME}-arm64"
 echo ""
 echo "访问地址："
-echo "  http://localhost:8888"
+echo "  http://localhost:9696"
 echo ""
 
 # 测试 x86_64 版本（如果在 x86_64 系统上）
@@ -157,8 +157,8 @@ fi
 
 echo "检测到架构: $ARCH"
 echo "使用程序: $PROGRAM"
-echo "请在浏览器中访问: http://localhost:8888"
-echo "或者访问: http://$(hostname -I | awk '{print $1}'):8888"
+echo "请在浏览器中访问: http://localhost:9696"
+echo "或者访问: http://$(hostname -I | awk '{print $1}'):9696"
 echo ""
 
 $PROGRAM

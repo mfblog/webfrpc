@@ -31,7 +31,7 @@ fi
 
 # 启动程序
 echo "启动配置管理器..."
-echo "请在浏览器中访问: http://localhost:8888"
-echo "或者访问: http://$(hostname -I | awk '{print $1}'):8888"
+echo "请在浏览器中访问: http://localhost:9696"
+echo "或者访问: http://$(hostname -I | awk '{print $1}'):9696"
 echo ""
 ./"$PROGRAM_NAME"

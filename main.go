@@ -64,10 +64,37 @@ type ErrorResponse struct {
 var (
 	installDir  = "/usr/local/frp"
 	configPath  = "/usr/local/frp/frpc.toml"
-	frpcPath    = "/usr/local/frp/frpc"
+	frpcPath    = "" // 将在 init() 中动态设置
 	serviceName = "frpc.service"
 	serviceFile = "/etc/systemd/system/frpc.service"
 )
+
+var (
+	effectiveFrpcPath string
+)
+
+func init() {
+	effectiveFrpcPath = getFrpcPath()
+	log.Printf("检测到有效的 frpc 路径: %s", effectiveFrpcPath)
+}
+
+// getFrpcPath 动态检测可用的 frpc 执行文件路径
+func getFrpcPath() string {
+	// 1. 优先检查 /usr/local/frp/frpc (标准路径或符号链接)
+	if _, err := os.Stat("/usr/local/frp/frpc"); err == nil {
+		return "/usr/local/frp/frpc"
+	}
+
+	// 2. 如果标准路径不存在，则根据系统架构检查
+	arch := getSystemArch()
+	archSpecificPath := fmt.Sprintf("/usr/local/frp/frpc-%s", arch)
+	if _, err := os.Stat(archSpecificPath); err == nil {
+		return archSpecificPath
+	}
+
+	// 3. 如果都找不到，返回默认路径，让后续的检查逻辑处理“未安装”的情况
+	return "/usr/local/frp/frpc"
+}
 
 func main() {
 	// 初始化检查和安装
@@ -138,15 +165,15 @@ func main() {
 
 	// 启动服务器
 	fmt.Println("FRP 配置管理服务启动中...")
-	fmt.Println("请在浏览器中访问: http://localhost:8888")
+	fmt.Println("请在浏览器中访问: http://localhost:9696")
 
 	// 自动打开浏览器
 	go func() {
 		time.Sleep(2 * time.Second)
-		openBrowser("http://localhost:8888")
+		openBrowser("http://localhost:9696")
 	}()
 
-	log.Fatal(r.Run(":8888"))
+	log.Fatal(r.Run(":9696"))
 }
 
 // 系统初始化检查
@@ -197,7 +224,7 @@ func ensureInstallDir() error {
 
 // 检查 frpc 客户端是否存在
 func checkFrpcExists() bool {
-	_, err := os.Stat(frpcPath)
+	_, err := os.Stat(effectiveFrpcPath)
 	return err == nil
 }
 
@@ -224,7 +251,7 @@ LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
-`, frpcPath, configPath)
+`, effectiveFrpcPath, configPath)
 
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
 		return err
@@ -286,8 +313,7 @@ func saveConfig(c *gin.Context) {
 	}
 
 	// 检查 frpc 是否已安装并且服务正常
-	frpcPath := "/usr/local/frp/frpc"
-	if _, err := os.Stat(frpcPath); os.IsNotExist(err) {
+	if !checkFrpcExists() {
 		// frpc 未安装，返回成功但提示需要安装
 		c.JSON(http.StatusOK, gin.H{
 			"message":     "配置已保存，请先安装 FRP 客户端",
@@ -593,7 +619,7 @@ func getFrpcVersion() string {
 		return ""
 	}
 
-	cmd := exec.Command(frpcPath, "--version")
+	cmd := exec.Command(effectiveFrpcPath, "--version")
 	output, err := cmd.Output()
 	if err != nil {
 		return "unknown"
@@ -675,29 +701,47 @@ func downloadAndInstallFrpc() error {
 
 	log.Printf("最新版本: %s", version)
 
-	// 构造下载链接（多个源）
+	// 检测系统架构
+	arch := getSystemArch()
+	log.Printf("目标架构: %s", arch)
+
+	// 构造下载链接（多个镜像源）
+	fileName := fmt.Sprintf("frp_%s_linux_%s.tar.gz", version, arch)
 	downloadURLs := []string{
-		fmt.Sprintf("https://github.com/fatedier/frp/releases/download/v%s/frp_%s_linux_amd64.tar.gz", version, version),
-		fmt.Sprintf("https://ghfast.top/https://github.com/fatedier/frp/releases/download/v%s/frp_%s_linux_amd64.tar.gz", version, version),
+		fmt.Sprintf("https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
+		fmt.Sprintf("https://ghfast.top/https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
+		fmt.Sprintf("https://gh-proxy.com/https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
+		fmt.Sprintf("https://hk.gh-proxy.com/https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
 	}
-	downloadFile := fmt.Sprintf("/tmp/frp_%s_linux_amd64.tar.gz", version)
+	downloadFile := fmt.Sprintf("/tmp/%s", fileName)
+
+	log.Printf("准备下载文件: %s", fileName)
 
 	// 尝试从多个源下载文件
 	var downloadErr error
-	for _, downloadURL := range downloadURLs {
-		log.Printf("尝试下载: %s", downloadURL)
-		cmd := exec.Command("curl", "-L", "--connect-timeout", "30", "--max-time", "300", "-o", downloadFile, downloadURL)
+	for i, downloadURL := range downloadURLs {
+		log.Printf("尝试从源 %d/%d 下载: %s", i+1, len(downloadURLs), downloadURL)
+
+		// 使用 curl 下载，显示进度
+		cmd := exec.Command("curl", "-L", "--connect-timeout", "30", "--max-time", "300",
+			"--progress-bar", "-o", downloadFile, downloadURL)
 		if err := cmd.Run(); err != nil {
 			downloadErr = err
-			log.Printf("下载失败: %v", err)
+			log.Printf("从源 %d 下载失败: %v", i+1, err)
+			// 清理可能的部分下载文件
+			os.Remove(downloadFile)
 			continue
 		}
 
-		// 检查文件是否下载成功
-		if _, err := os.Stat(downloadFile); err == nil {
-			log.Println("下载成功")
+		// 检查文件是否下载成功并且大小合理
+		if stat, err := os.Stat(downloadFile); err == nil && stat.Size() > 1024*1024 { // 至少1MB
+			log.Printf("下载成功，文件大小: %.2f MB", float64(stat.Size())/(1024*1024))
 			downloadErr = nil
 			break
+		} else {
+			log.Printf("从源 %d 下载的文件无效或过小", i+1)
+			os.Remove(downloadFile)
+			downloadErr = fmt.Errorf("下载的文件无效")
 		}
 	}
 
@@ -721,14 +765,16 @@ func downloadAndInstallFrpc() error {
 	}
 
 	// 复制 frpc 到安装目录
-	srcPath := fmt.Sprintf("/tmp/frp_%s_linux_amd64/frpc", version)
-	if err := copyFile(srcPath, frpcPath); err != nil {
-		return fmt.Errorf("复制文件失败: %v", err)
+	srcPath := fmt.Sprintf("/tmp/frp_%s_linux_%s/frpc", version, arch)
+	destPath := "/usr/local/frp/frpc" // 始终使用标准路径
+
+	if err := copyFile(srcPath, destPath); err != nil {
+		return fmt.Errorf("复制文件到 %s 失败: %v", destPath, err)
 	}
 
 	// 设置可执行权限
-	if err := os.Chmod(frpcPath, 0755); err != nil {
-		return fmt.Errorf("设置权限失败: %v", err)
+	if err := os.Chmod(destPath, 0755); err != nil {
+		return fmt.Errorf("设置 %s 权限失败: %v", destPath, err)
 	}
 
 	// 创建系统服务（如果不存在）
@@ -740,8 +786,39 @@ func downloadAndInstallFrpc() error {
 
 	// 清理临时文件
 	os.Remove(downloadFile)
-	os.RemoveAll(fmt.Sprintf("/tmp/frp_%s_linux_amd64", version))
+	os.RemoveAll(fmt.Sprintf("/tmp/frp_%s_linux_%s", version, arch))
 
 	log.Println("frpc 安装完成")
 	return nil
+}
+
+// 获取系统架构
+func getSystemArch() string {
+	cmd := exec.Command("uname", "-m")
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("获取系统架构失败: %v，使用默认架构 amd64", err)
+		return "amd64" // 默认返回 amd64
+	}
+
+	arch := strings.TrimSpace(string(output))
+	log.Printf("检测到原始架构: %s", arch)
+
+	switch arch {
+	case "x86_64":
+		log.Printf("架构映射: %s -> amd64", arch)
+		return "amd64"
+	case "aarch64", "arm64":
+		log.Printf("架构映射: %s -> arm64", arch)
+		return "arm64"
+	case "armv7l", "armv6l":
+		log.Printf("架构映射: %s -> arm", arch)
+		return "arm"
+	case "i386", "i686":
+		log.Printf("架构映射: %s -> 386", arch)
+		return "386"
+	default:
+		log.Printf("未知架构: %s，使用默认架构 amd64", arch)
+		return "amd64"
+	}
 }
