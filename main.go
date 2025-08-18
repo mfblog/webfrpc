@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -71,6 +72,8 @@ var (
 var (
 	effectiveFrpcPath string
 )
+
+var configMutex = &sync.Mutex{}
 
 func init() {
 	effectiveFrpcPath = getFrpcPath()
@@ -307,6 +310,9 @@ func getConfig(c *gin.Context) {
 
 // 保存配置并重启服务
 func saveConfig(c *gin.Context) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
 	var config Config
 	if err := c.ShouldBindJSON(&config); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "无效的配置数据: " + err.Error()})
@@ -390,13 +396,23 @@ func getLogs(c *gin.Context) {
 func getServiceStatus(c *gin.Context) {
 	// 检查服务状态
 	statusCmd := exec.Command("systemctl", "is-active", "frpc.service")
-	statusOutput, _ := statusCmd.Output()
-	status := string(statusOutput)
-	status = strings.TrimSpace(status)
+	statusOutput, err := statusCmd.Output()
+	if err != nil {
+		// 如果命令失败，通常意味着服务不是 active 状态
+		// 我们可以安全地将状态设为 "inactive" 或 "failed"
+		// 但为了更准确，我们返回详细错误
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "检查服务状态失败: " + err.Error()})
+		return
+	}
+	status := strings.TrimSpace(string(statusOutput))
 
 	// 获取服务详细信息
 	infoCmd := exec.Command("systemctl", "status", "frpc.service", "--no-pager", "-l")
-	infoOutput, _ := infoCmd.Output()
+	infoOutput, err := infoCmd.Output()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "获取服务详情失败: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": status,
@@ -418,24 +434,27 @@ func getSystemStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-// 安装 frpc
-func installFrpc(c *gin.Context) {
+// installOrUpdateFrpc 是安装和更新 frpc 的通用处理函数
+func installOrUpdateFrpc(c *gin.Context, action string) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
 	if err := downloadAndInstallFrpc(); err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "安装失败: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("%s失败: %s", action, err.Error())})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "frpc 安装成功"})
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("frpc %s成功", action)})
+}
+
+// 安装 frpc
+func installFrpc(c *gin.Context) {
+	installOrUpdateFrpc(c, "安装")
 }
 
 // 更新 frpc
 func updateFrpc(c *gin.Context) {
-	if err := downloadAndInstallFrpc(); err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "更新失败: " + err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "frpc 更新成功"})
+	installOrUpdateFrpc(c, "更新")
 }
 
 // 从文件加载配置
@@ -648,13 +667,7 @@ func getFrpcVersion() string {
 func getLatestVersion() string {
 	// 尝试多个源获取版本信息
 	sources := []string{
-		"https://ghfast.top/https://github.com/fatedier/frp/releases/latest",
-		"https://hk.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
-		"https://gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
-		"https://hk.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
-		"https://gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
-		"https://cdn.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
-		"https://edgeone.gh-proxy.com/https://github.com/fatedier/frp/releases/latest",
+		"http://154.17.224.29/rproxy?url=https://github.com/fatedier/frp/releases/latest",
 	}
 
 	for _, source := range sources {
@@ -715,10 +728,7 @@ func downloadAndInstallFrpc() error {
 	// 构造下载链接（多个镜像源）
 	fileName := fmt.Sprintf("frp_%s_linux_%s.tar.gz", version, arch)
 	downloadURLs := []string{
-		fmt.Sprintf("https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
-		fmt.Sprintf("https://ghfast.top/https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
-		fmt.Sprintf("https://gh-proxy.com/https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
-		fmt.Sprintf("https://hk.gh-proxy.com/https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
+		fmt.Sprintf("http://154.17.224.29/rproxy?url=https://github.com/fatedier/frp/releases/download/v%s/%s", version, fileName),
 	}
 	downloadFile := fmt.Sprintf("/tmp/%s", fileName)
 

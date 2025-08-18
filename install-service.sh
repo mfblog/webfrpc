@@ -85,29 +85,6 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
-echo "创建 frpc 系统服务文件..."
-FRPC_SERVICE_FILE="/etc/systemd/system/frpc.service"
-FRPC_PATH="${INSTALL_DIR}/frpc"
-FRPC_CONFIG_PATH="${INSTALL_DIR}/frpc.toml"
-
-cat > $FRPC_SERVICE_FILE << EOF
-[Unit]
-Description=FRP Client
-After=network.target
-Wants=network.target
-
-[Service]
-Type=simple
-User=root
-Restart=on-failure
-RestartSec=5s
-ExecStart=$FRPC_PATH -c $FRPC_CONFIG_PATH
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 # 重新加载 systemd 配置
 echo "重新加载 systemd 配置..."
 systemctl daemon-reload
@@ -115,10 +92,6 @@ systemctl daemon-reload
 # 启用 webfrpc 服务
 echo "启用 ${SERVICE_NAME} 服务（开机自启动）..."
 systemctl enable $SERVICE_NAME
-
-# 启用 frpc 服务
-echo "启用 frpc.service 服务（开机自启动）..."
-systemctl enable frpc.service
 
 # 启动服务
 echo "启动服务..."
